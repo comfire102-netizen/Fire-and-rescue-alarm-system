@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+*.lock
+package-lock.json
+
+# Generated files
+pikud_alerts_*.xlsx
+*.log
+excel_reports/
+
+# Backend data
+backend/data/settings.json
+backend/data/logs.json
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Old Python script (deprecated)
+script.py
+requirements.txt
