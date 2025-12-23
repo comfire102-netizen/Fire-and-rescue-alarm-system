@@ -22,11 +22,46 @@ class StationManager {
             const workbook = new ExcelJS.Workbook();
             await workbook.xlsx.readFile(this.excelFilePath);
             
-            // טעינת גליון D.B (הגליון השני)
-            let worksheet = workbook.getWorksheet('D.B');
-            if (!worksheet) {
-                // נסיון עם שם אחר או גליון שני
-                worksheet = workbook.getWorksheet(2);
+            // נסיון ראשון: קריאת גליון בשם 'D.B' או הגליון השני כפי שהיה עד כה
+            let worksheet = workbook.getWorksheet('D.B') || workbook.getWorksheet(2);
+
+            // בנוסף: נסיון לקרוא את גליון 'רשימת תחנות' (כדי לקבל חלוקה לפי מחוזות כפי שביקשת)
+            const listSheet = workbook.getWorksheet('רשימת תחנות') || workbook.getWorksheet('רשימת תחנות ');
+            const mappingByApiCode = {};
+            const mappingByPolygon = {};
+
+            // helper to normalize polygon keys for robust matching
+            const normalizeKey = (s) => {
+                if (!s) return '';
+                return s.toString().toLowerCase().replace(/[\u0590-\u05FF\uFB1D-\uFB4F]/g, ch => ch).replace(/[^\p{L}0-9]+/gu, ' ').trim();
+            };
+            if (listSheet) {
+                // נניח שיש כותרות בשורה הראשונה - ננתח כדי למצוא עמודות רלוונטיות
+                const headerRow = listSheet.getRow(1);
+                const headers = {};
+                for (let c = 1; c <= headerRow.cellCount; c++) {
+                    const txt = (headerRow.getCell(c).value || '').toString().trim();
+                    if (!txt) continue;
+                    // keep first occurrence of a header name (avoid duplicate 'מחוז' overwriting)
+                    if (!headers[txt]) headers[txt] = c;
+                }
+
+                // נסה למצוא עמודות עם שמות מוכרים
+                const apiCol = headers['קוד'] || headers['קוד API'] || headers['API'] || headers['מס\'ד'] || headers['מס"ד'] || 2;
+                const districtCol = headers['מחוז'] || headers['מחוזות'] || headers['אזור'] || headers['district'] || 3;
+
+                for (let r = 2; r <= listSheet.rowCount; r++) {
+                    const row = listSheet.getRow(r);
+                    const apiVal = (row.getCell(apiCol).value || '').toString().trim();
+                    const districtVal = (row.getCell(districtCol).value || '').toString().trim();
+                    const polygonVal = (row.getCell(headers['פוליגון פיקוד העורף'] || 7).value || '').toString().trim();
+                    if (apiVal) {
+                        mappingByApiCode[apiVal.replace(/^0+/, '')] = districtVal;
+                    }
+                    if (polygonVal) {
+                        mappingByPolygon[normalizeKey(polygonVal)] = districtVal;
+                    }
+                }
             }
             
             if (!worksheet) {
@@ -58,6 +93,12 @@ class StationManager {
                 const address = String(row.getCell(8).value || '').trim(); // H - כתובת IP (אופציונלי)
                 const districts = String(row.getCell(9).value || '').trim(); // I - מחוזות
 
+                // אם קיים מיפוי מהגליון הראשי, השתמש בו (מעדיף ערכי מחוז כפי בגליון 'רשימת תחנות')
+                const apiKey = apiCode.replace(/^0+/, '');
+                const mappedByApi = mappingByApiCode[apiKey] || mappingByApiCode[apiCode];
+                const mappedByPolygon = mappingByPolygon[normalizeKey(polygon)];
+                const finalDistricts = mappedByPolygon || mappedByApi || districts;
+
                 // דילוג על שורות ריקות
                 if (!serial || !stationName || !polygon || !apiCode || !serverDistrict) {
                     continue;
@@ -70,7 +111,16 @@ class StationManager {
                     serverDistrict: serverDistrict.toUpperCase(), // A/B/C
                     apiCode: apiCode.padStart(3, '0'), // וידוא שהקוד הוא 3 ספרות (121, 129 וכו')
                     address,
-                    districts
+                    districts: finalDistricts,
+                    // normalized human-readable district name (prefer mapping from רשימת תחנות)
+                    districtNormalized: (() => {
+                        const raw = (finalDistricts || '').toString().trim();
+                        if (raw && raw.length > 0 && raw !== 'A' && raw !== 'B' && raw !== 'C') return raw;
+                        // try server district codes fallback
+                        const code = (serverDistrict || '').toString().trim().toUpperCase();
+                        const fallback = { A: 'מרכז', B: 'ירושלים', C: 'דרום' };
+                        return fallback[code] || raw || 'לא ידוע';
+                    })()
                 };
 
                 this.stations.push(station);
@@ -156,6 +206,47 @@ class StationManager {
      */
     getStationsByServerDistrict(serverDistrict) {
         return this.stations.filter(s => s.serverDistrict === serverDistrict.toUpperCase());
+    }
+
+    /**
+     * חיפוש מדויק לפי שם עיר/פוליגון - מנסה התאמה מלאה או התאמת מילים שלמות
+     */
+    findStationsByCityExact(cityName) {
+        if (!this.loaded) {
+            throw new Error('התחנות לא נטענו עדיין. קרא ל-load() תחילה.');
+        }
+
+        const search = (cityName || '').toString().toLowerCase().trim();
+        if (!search) return [];
+
+        const tokens = search.split(/[^\p{L}0-9]+/u).filter(Boolean);
+
+        const results = [];
+        for (const station of this.stations) {
+            const polygon = (station.polygon || '').toString().toLowerCase();
+            const name = (station.stationName || '').toString().toLowerCase();
+            // exact full match
+            if (polygon === search || name === search) {
+                results.push(station);
+                continue;
+            }
+            // match any token as full word in polygon or name
+            const polygonTokens = polygon.split(/[^\p{L}0-9]+/u).filter(Boolean);
+            const nameTokens = name.split(/[^\p{L}0-9]+/u).filter(Boolean);
+            let matched = false;
+            for (const t of tokens) {
+                if (polygonTokens.includes(t) || nameTokens.includes(t)) { matched = true; break; }
+            }
+            if (matched) results.push(station);
+        }
+
+        // de-duplicate by serial
+        const uniq = [];
+        const seen = new Set();
+        for (const s of results) {
+            if (!seen.has(s.serial)) { uniq.push(s); seen.add(s.serial); }
+        }
+        return uniq;
     }
 }
 

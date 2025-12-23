@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>תצוגת התרעות — מחוז</title>
+  <link rel="stylesheet" href="/css/main.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body class="p-6 bg-slate-50">
+  <div class="max-w-5xl mx-auto">
+    <header class="mb-6 text-center">
+      <h1 class="text-2xl font-bold">תצוגת התרעות — מבט מלא</h1>
+      <p class="text-sm text-slate-600">דף ייעודי להצגת תחנות ומצב התרעות בזמן אמת</p>
+    </header>
+
+    <div class="flex gap-4">
+      <aside class="w-64 bg-white p-4 rounded-lg shadow-sm">
+        <div class="mb-3">
+          <label class="block text-slate-600 text-sm">בחר מחוז</label>
+          <select id="districtSelect" class="mt-2 w-full border rounded-md p-2"></select>
+        </div>
+        <div>
+          <button id="backIndex" class="btn btn-info w-full">חזור לדשבורד</button>
+        </div>
+      </aside>
+
+      <main class="flex-1 bg-white p-4 rounded-lg shadow-sm">
+        <div id="liveHeader" class="mb-4"></div>
+        <h2 id="pageTitle" class="text-lg font-bold mb-3">מחוז</h2>
+        <div class="mb-3 flex items-center gap-2">
+          <input id="filterInput" placeholder="חפש תחנה" class="border p-2 rounded-md flex-1" />
+          <button id="refreshBtn" class="btn btn-primary">רענון</button>
+        </div>
+
+        <div id="stationsList" class="space-y-2"></div>
+      </main>
+    </div>
+  </div>
+
+<script src="/js/alerts.js"></script>
+</body>
+</html>
